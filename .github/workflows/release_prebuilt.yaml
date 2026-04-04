@@ -1,0 +1,139 @@
+name: Release Prebuilt
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-prebuilt:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            backend: WGPU
+            artifact_suffix: linux-x86_64
+          - os: windows-latest
+            platform: windows
+            backend: WGPU
+            artifact_suffix: windows-x64
+          - os: macos-latest
+            platform: macosx
+            backend: WGPU
+            artifact_suffix: macosx
+          - os: ubuntu-latest
+            platform: wasm
+            backend: EMDAWNWEBGPU
+            artifact_suffix: wasm-wasm32
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Emscripten SDK
+        if: ${{ matrix.platform == 'wasm' }}
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - name: Compute Artifact Suffix
+        id: artifact_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix="${{ matrix.artifact_suffix }}"
+          if [ "${{ matrix.platform }}" = "macosx" ]; then
+            arch="$(uname -m)"
+            case "${arch}" in
+              arm64|aarch64) arch="arm64" ;;
+              x86_64|amd64) arch="x86_64" ;;
+            esac
+            suffix="macosx-${arch}"
+          fi
+          echo "suffix=${suffix}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install Linux Dependencies
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake git clang ninja-build python3 \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev wayland-protocols libxkbcommon-dev
+
+      - name: Configure (Desktop)
+        if: ${{ matrix.platform != 'wasm' }}
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWEBGPU_BACKEND=${{ matrix.backend }}
+          -DWEBGPU_BUILD_FROM_SOURCE=OFF
+          -DWEBGPU_BUILD_GLFW3WEBGPU=ON
+          -DWEBGPU_BUILD_EXAMPLES=OFF
+
+      - name: Configure (WASM)
+        if: ${{ matrix.platform == 'wasm' }}
+        run: >
+          emcmake cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWEBGPU_BACKEND=${{ matrix.backend }}
+          -DWEBGPU_BUILD_FROM_SOURCE=OFF
+          -DWEBGPU_BUILD_GLFW3WEBGPU=ON
+          -DWEBGPU_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Install Bundle
+        run: cmake --install build --config Release --prefix prebuilt/install
+
+      - name: Package Bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.release.tag_name || inputs.tag }}"
+          SUFFIX="${{ steps.artifact_meta.outputs.suffix }}"
+          STAGE="prebuilt/webgpu-sdk-prebuilt-${VERSION}-${SUFFIX}"
+
+          cmake -E rm -rf "${STAGE}"
+          cmake -E make_directory "${STAGE}"
+          cmake -E copy_directory prebuilt/install "${STAGE}"
+          cmake -E copy LICENSE "${STAGE}/LICENSE"
+          cmake -E copy README.md "${STAGE}/README.md"
+
+          cmake -E tar cfv "prebuilt/webgpu-sdk-prebuilt-${VERSION}-${SUFFIX}.zip" --format=zip "${STAGE}"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-${{ steps.artifact_meta.outputs.suffix }}
+          path: prebuilt/*.zip
+
+  upload-release-assets:
+    needs: build-prebuilt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download All Zips
+        uses: actions/download-artifact@v4
+        with:
+          path: prebuilt_assets
+
+      - name: Publish Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
+          files: prebuilt_assets/**/*.zip

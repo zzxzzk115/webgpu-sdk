@@ -1,0 +1,38 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake git clang ninja-build python3
+
+      - name: Configure
+        run: >
+          emcmake cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DWEBGPU_BACKEND=EMDAWNWEBGPU
+          -DWEBGPU_BUILD_FROM_SOURCE=OFF
+          -DWEBGPU_BUILD_GLFW3WEBGPU=ON
+          -DWEBGPU_BUILD_EXAMPLES=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
