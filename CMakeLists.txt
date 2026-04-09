@@ -137,6 +137,16 @@ if (TARGET webgpu)
 	get_target_property(_webgpu_imported_implib webgpu IMPORTED_IMPLIB)
 	if (_webgpu_imported_implib AND EXISTS "${_webgpu_imported_implib}")
 		install(FILES "${_webgpu_imported_implib}" DESTINATION lib)
+
+		# On MSVC, some prebuilt shared libs ship import libraries as *.dll.lib.
+		# Install a *.lib alias to improve compatibility with consumers expecting that naming.
+		if (WIN32)
+			get_filename_component(_webgpu_implib_name "${_webgpu_imported_implib}" NAME)
+			string(REGEX REPLACE "\\.dll\\.lib$" ".lib" _webgpu_implib_alias_name "${_webgpu_implib_name}")
+			if (NOT _webgpu_implib_alias_name STREQUAL _webgpu_implib_name)
+				install(FILES "${_webgpu_imported_implib}" DESTINATION lib RENAME "${_webgpu_implib_alias_name}")
+			endif()
+		endif()
 	endif()
 endif()
 
