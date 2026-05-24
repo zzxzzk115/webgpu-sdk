@@ -81,6 +81,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DWEBGPU_BACKEND=${{ matrix.backend }}
           -DWEBGPU_BUILD_FROM_SOURCE=OFF
+          -DWEBGPU_LINK_TYPE=STATIC
           -DWEBGPU_BUILD_GLFW3WEBGPU=ON
           -DWEBGPU_BUILD_EXAMPLES=OFF
 
