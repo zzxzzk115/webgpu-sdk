@@ -1,0 +1,2 @@
+# Patches apply to sources cloned with LF line endings; keep them LF on every checkout.
+*.patch text eol=lf
