@@ -51,12 +51,20 @@ if (CMAKE_CROSSCOMPILING OR NOT _target_arch STREQUAL _host_arch)
 		"architecture, or use the precompiled release (WEBGPU_BUILD_FROM_SOURCE=OFF)")
 endif()
 
+# On Windows the Rust toolchain must use the compiler's ABI; the library's file names follow it.
+set(_windows_abi)
+if (WIN32 AND MSVC)
+	set(_windows_abi msvc)
+elseif (WIN32)
+	set(_windows_abi gnu)
+endif()
+
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/wgpu-git-tag.txt" _wgpu_tag LIMIT_COUNT 1)
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/rust-toolchain.txt" _rust_toolchain LIMIT_COUNT 1)
 file(GLOB _patches "${CMAKE_CURRENT_LIST_DIR}/patch/*.patch")
 list(SORT _patches)
 
-set(_stamp "wgpu-native ${WGPU_VERSION}\nwgpu ${_wgpu_tag}\nrust ${_rust_toolchain}\n")
+set(_stamp "wgpu-native ${WGPU_VERSION}\nwgpu ${_wgpu_tag}\nrust ${_rust_toolchain} ${_windows_abi}\n")
 foreach(_patch IN LISTS _patches)
 	get_filename_component(_name "${_patch}" NAME)
 	file(SHA256 "${_patch}" _hash)
@@ -82,6 +90,7 @@ else()
 			"-DWORK_DIR=${CMAKE_BINARY_DIR}/wgpu-native-src"
 			"-DOUT_DIR=${WGPU_NATIVE_DIST_DIR}"
 			"-DSTAMP_FILE=${CMAKE_BINARY_DIR}/wgpu-native-stamp.txt"
+			"-DWINDOWS_ABI=${_windows_abi}"
 			-P "${PROJECT_SOURCE_DIR}/cmake/build_wgpu_native.cmake"
 		RESULT_VARIABLE _result
 	)

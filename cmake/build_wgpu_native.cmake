@@ -3,14 +3,15 @@
 # external/wgpu-native/FetchWgpuNativeSource.cmake:
 #
 #   cmake -DWGPU_NATIVE_TAG=<tag> -DWGPU_TAG=<tag> -DRUST_TOOLCHAIN=<version> -DPATCH_DIR=<dir>
-#         -DWORK_DIR=<dir> -DOUT_DIR=<dir> -DSTAMP_FILE=<file> -P build_wgpu_native.cmake
+#         -DWORK_DIR=<dir> -DOUT_DIR=<dir> -DSTAMP_FILE=<file> -DWINDOWS_ABI=<msvc|gnu|> -P build_wgpu_native.cmake
 #
+# WINDOWS_ABI is the C/C++ compiler's ABI on a Windows host (empty elsewhere); the Rust toolchain must match it.
 # Every step must succeed: a patch that does not apply, a wgpu-native tag that pins another wgpu, or a build that
 # does not use the patched crates stops it. STAMP_FILE is copied to OUT_DIR/stamp.txt last, once the output is complete.
 
 cmake_minimum_required(VERSION 3.21)
 
-foreach(_var WGPU_NATIVE_TAG WGPU_TAG RUST_TOOLCHAIN PATCH_DIR WORK_DIR OUT_DIR STAMP_FILE)
+foreach(_var WGPU_NATIVE_TAG WGPU_TAG RUST_TOOLCHAIN PATCH_DIR WORK_DIR OUT_DIR STAMP_FILE WINDOWS_ABI)
 	if (NOT DEFINED ${_var})
 		message(FATAL_ERROR "build_wgpu_native.cmake: ${_var} is not set")
 	endif()
@@ -101,6 +102,10 @@ if (NOT _result EQUAL 0 OR NOT _rustc MATCHES "host: ([^\r\n]+)")
 	message(FATAL_ERROR "build_wgpu_native.cmake: rustc -vV did not report the host triple:\n${_rustc}")
 endif()
 set(_triple "${CMAKE_MATCH_1}")
+if (CMAKE_HOST_WIN32 AND NOT _triple MATCHES "-${WINDOWS_ABI}$")
+	message(FATAL_ERROR "build_wgpu_native.cmake: the Rust toolchain builds for ${_triple}, but the C/C++ compiler uses "
+		"the ${WINDOWS_ABI} ABI; install the toolchain for ${RUST_TOOLCHAIN} with that ABI as rustup's default host")
+endif()
 
 message(STATUS "wgpu-native: cargo build --release --target ${_triple} (toolchain ${RUST_TOOLCHAIN})")
 # wgpuGetVersion() reports this, as in the upstream release build.
@@ -110,9 +115,12 @@ run_checked("cargo build" "${_native}" "${CARGO_EXECUTABLE}" build --release --t
 
 # Lay the output out like a wgpu-native release.
 set(_target "${WORK_DIR}/target/${_triple}/release")
-if (CMAKE_HOST_WIN32)
+if (CMAKE_HOST_WIN32 AND WINDOWS_ABI STREQUAL "msvc")
 	set(_static wgpu_native.lib)
 	set(_shared wgpu_native.dll wgpu_native.dll.lib)
+elseif (CMAKE_HOST_WIN32)
+	set(_static libwgpu_native.a)
+	set(_shared wgpu_native.dll libwgpu_native.dll.a)
 elseif (CMAKE_HOST_APPLE)
 	set(_static libwgpu_native.a)
 	set(_shared libwgpu_native.dylib)
