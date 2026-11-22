@@ -1,0 +1,39 @@
+Fix: D3D12 buffer <-> texture copies ignore rows_per_image for 3D textures.
+
+wgpu-hal's D3D12 backend sets D3D12_SUBRESOURCE_FOOTPRINT.Height to the copy height. D3D12 steps between the depth
+slices of a placed footprint by RowPitch * Height, so when rows_per_image is larger than the copy height every slice
+after the first is read from or written to the wrong buffer offset. Height now spans rows_per_image rows of blocks;
+the copy box still limits what is copied. 2D array copies are not affected (wgpu-core splits them into one region per
+layer). The Vulkan backend is not affected.
+
+Maintained by webgpu-sdk; not reported upstream. Applied to gfx-rs/wgpu at the tag in ../wgpu-git-tag.txt. When it no
+longer applies the build fails: rebase it, or delete it once upstream has fixed the defect. The regression check is
+tests/wgpu-native/rows_per_image_3d.cpp, run on WARP in CI.
+
+diff --git a/wgpu-hal/src/dx12/command.rs b/wgpu-hal/src/dx12/command.rs
+index 99cee37..f4b1bd9 100644
+--- a/wgpu-hal/src/dx12/command.rs
++++ b/wgpu-hal/src/dx12/command.rs
+@@ -27,7 +27,7 @@ impl crate::BufferTextureCopy {
+         &self,
+         format: wgt::TextureFormat,
+     ) -> Direct3D12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+-        let (block_width, _) = format.block_dimensions();
++        let (block_width, block_height) = format.block_dimensions();
+         Direct3D12::D3D12_PLACED_SUBRESOURCE_FOOTPRINT {
+             Offset: self.buffer_layout.offset,
+             Footprint: Direct3D12::D3D12_SUBRESOURCE_FOOTPRINT {
+@@ -37,7 +37,12 @@ impl crate::BufferTextureCopy {
+                 )
+                 .unwrap(),
+                 Width: self.size.width,
+-                Height: self.size.height,
++                // D3D12 steps between depth slices by RowPitch * Height, so Height must span the buffer's
++                // rows per image, not just the copied rows; the copy box still limits what is copied.
++                Height: self
++                    .buffer_layout
++                    .rows_per_image
++                    .map_or(self.size.height, |rows| (rows * block_height).max(self.size.height)),
+                 Depth: self.size.depth,
+                 RowPitch: {
+                     let actual = self.buffer_layout.bytes_per_row.unwrap_or_else(|| {

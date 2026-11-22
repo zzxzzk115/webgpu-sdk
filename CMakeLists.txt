@@ -43,6 +43,9 @@ option(WEBGPU_BUILD_FROM_SOURCE "\
 option(WEBGPU_BUILD_EXAMPLES "\
 	When ON, build local example programs from examples/." OFF)
 
+option(WEBGPU_BUILD_TESTS "\
+	When ON, build the checks in tests/ (for WGPU: the regression check of the wgpu-native patches)." OFF)
+
 option(WEBGPU_BUILD_GLFW3WEBGPU "\
 	When ON, build the glfw3webgpu helper library." ON)
 
@@ -156,4 +159,8 @@ endif()
 
 if (WEBGPU_BUILD_EXAMPLES)
 	add_subdirectory(examples)
+endif()
+
+if (WEBGPU_BUILD_TESTS)
+	add_subdirectory(tests)
 endif()

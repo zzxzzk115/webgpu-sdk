@@ -31,7 +31,8 @@ set(WGPU_BINARY_MIRROR "https://github.com/gfx-rs/wgpu-native" CACHE STRING "\
 	The repository where to find precompiled releases of wgpu-native.")
 
 if (WEBGPU_BUILD_FROM_SOURCE)
-	message(FATAL_ERROR "Building wgpu-native from source is not available. Either switch to Dawn (WEBGPU_BACKEND=DAWN) or use precompiled binaries (WEBGPU_BUILD_FROM_SOURCE=OFF).")
+	# The source build applies the patches in patch/, which the precompiled releases do not have.
+	include(FetchWgpuNativeSource.cmake)
 else()
 	include(FetchWgpuNativePrecompiled.cmake)
 endif()
