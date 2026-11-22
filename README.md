@@ -89,6 +89,11 @@ same `wgpu*` symbols as the upstream release:
 
 - `.github/workflows/build_wgpu_native_source.yaml`
 
+The WASM workflows pin emsdk to 7.0.0, the Emscripten VRI and Vultra build their web targets with. Changing it
+is a deliberate upgrade. Before raising it, fix the vendored `external/emscripten-glfw3`: its
+`src/cpp/emscripten/glfw3/Window.cpp` uses `std::round` and `std::floor` without including `<cmath>`, which newer
+Emscripten rejects.
+
 Prebuilt release workflow:
 
 - `.github/workflows/release_prebuilt.yaml`
