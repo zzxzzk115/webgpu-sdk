@@ -74,16 +74,47 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libwayland-dev wayland-protocols libxkbcommon-dev
 
+      # The desktop packages carry wgpu-native built from source with webgpu-sdk's patches
+      # (external/wgpu-native/patch), not the upstream release, which lacks them.
+      - name: Install Rust
+        if: ${{ matrix.platform == 'windows' || matrix.platform == 'macosx' }}
+        shell: bash
+        run: rustup toolchain install "$(cat external/wgpu-native/rust-toolchain.txt)" --profile minimal
+
+      # As upstream does, the Linux library is built in manylinux_2_28 so it needs no newer glibc than 2.28; the
+      # configure below reuses it.
+      - name: Build wgpu-native in manylinux_2_28
+        if: ${{ matrix.platform == 'linux' }}
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src quay.io/pypa/manylinux_2_28_x86_64 bash -c '
+            set -euo pipefail
+            git config --global --add safe.directory "*"
+            dnf install -y -q clang-devel
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y -q --default-toolchain none --profile minimal
+            source "$HOME/.cargo/env"
+            rustup toolchain install "$(cat external/wgpu-native/rust-toolchain.txt)" --profile minimal
+            /opt/python/cp312-cp312/bin/pip install -q cmake
+            /opt/python/cp312-cp312/bin/cmake -S . -B build-container -DCMAKE_BUILD_TYPE=Release -DWEBGPU_BACKEND=WGPU \
+              -DWEBGPU_BUILD_FROM_SOURCE=ON -DWEBGPU_LINK_TYPE=STATIC -DWEBGPU_BUILD_GLFW3WEBGPU=OFF \
+              -DWGPU_NATIVE_DIST_DIR=/src/wgpu-native-dist
+          '
+
       - name: Configure (Desktop)
         if: ${{ matrix.platform != 'wasm' }}
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DWEBGPU_BACKEND=${{ matrix.backend }}
-          -DWEBGPU_BUILD_FROM_SOURCE=OFF
-          -DWEBGPU_LINK_TYPE=STATIC
-          -DWEBGPU_BUILD_GLFW3WEBGPU=ON
-          -DWEBGPU_BUILD_EXAMPLES=OFF
+        shell: bash
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWEBGPU_BACKEND=${{ matrix.backend }} \
+            -DWEBGPU_BUILD_FROM_SOURCE=ON \
+            -DWGPU_NATIVE_DIST_DIR="$PWD/wgpu-native-dist" \
+            -DWEBGPU_LINK_TYPE=STATIC \
+            -DWEBGPU_BUILD_GLFW3WEBGPU=ON \
+            -DWEBGPU_BUILD_EXAMPLES=OFF \
+            -DWEBGPU_BUILD_TESTS=ON | tee configure.log
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            grep -q "wgpu-native: reusing the source build" configure.log
+          fi
 
       - name: Configure (WASM)
         if: ${{ matrix.platform == 'wasm' }}
@@ -97,6 +128,10 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: Regression check of the wgpu-native patches on WARP
+        if: ${{ matrix.platform == 'windows' }}
+        run: build/tests/Release/wgpu_rows_per_image_3d.exe dx12 warp
 
       - name: Install Bundle
         run: cmake --install build --config Release --prefix prebuilt/install

@@ -1,0 +1,150 @@
+name: Build wgpu-native from source
+
+# Builds the patched wgpu-native (external/wgpu-native/patch) the release packages ship, and checks it:
+# - the regression check of the D3D12 patch passes on WARP with the patched library and fails with the unpatched
+#   upstream release, so the check itself is shown to detect the defect;
+# - the patched library exports the same wgpu* symbols as the upstream release of the same tag.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CONFIGURE_ARGS: >-
+    -DCMAKE_BUILD_TYPE=Release
+    -DWEBGPU_BACKEND=WGPU
+    -DWEBGPU_LINK_TYPE=STATIC
+    -DWEBGPU_BUILD_GLFW3WEBGPU=OFF
+    -DWEBGPU_BUILD_TESTS=ON
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        shell: bash
+        run: rustup toolchain install "$(cat external/wgpu-native/rust-toolchain.txt)" --profile minimal
+
+      - name: Cache cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('external/wgpu-native/*.txt', 'external/wgpu-native/patch/*.patch') }}
+
+      - name: Configure (patched, from source)
+        shell: bash
+        run: cmake -S . -B build $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=ON
+
+      - name: Build (patched)
+        run: cmake --build build --config Release --parallel
+
+      - name: Regression check on WARP (patched library must pass)
+        run: build/tests/Release/wgpu_rows_per_image_3d.exe dx12 warp
+
+      - name: Configure (unpatched upstream release)
+        shell: bash
+        run: cmake -S . -B build-upstream $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=OFF
+
+      - name: Build (unpatched)
+        run: cmake --build build-upstream --config Release --parallel
+
+      - name: Regression check on WARP (unpatched library must fail)
+        shell: bash
+        run: |
+          set +e
+          build-upstream/tests/Release/wgpu_rows_per_image_3d.exe dx12 warp
+          code=$?
+          set -e
+          if [ "$code" != 2 ]; then
+            echo "expected the unpatched library to report a mismatch (exit 2), got $code"
+            exit 1
+          fi
+
+      - name: Compare exported symbols with the upstream release
+        shell: bash
+        run: >
+          .github/scripts/compare_wgpu_symbols.sh build/wgpu-native-dist/lib/wgpu_native.lib
+          "$(find build-upstream/_deps -name wgpu_native.lib | head -n 1)"
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        run: rustup toolchain install "$(cat external/wgpu-native/rust-toolchain.txt)" --profile minimal
+
+      - name: Cache cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('external/wgpu-native/*.txt', 'external/wgpu-native/patch/*.patch') }}
+
+      - name: Configure and build (patched, from source)
+        run: |
+          cmake -S . -B build $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=ON
+          cmake --build build --config Release --parallel
+
+      - name: Configure and build (unpatched upstream release)
+        run: |
+          cmake -S . -B build-upstream $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=OFF
+          cmake --build build-upstream --config Release --parallel
+
+      - name: Compare exported symbols with the upstream release
+        run: >
+          .github/scripts/compare_wgpu_symbols.sh build/wgpu-native-dist/lib/libwgpu_native.a
+          "$(find build-upstream/_deps -name libwgpu_native.a | head -n 1)"
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # As upstream does, build in manylinux_2_28 so the library needs no newer glibc than 2.28. The host configure
+      # below then reuses that build (same tags, toolchain and patches) instead of building again.
+      - name: Build wgpu-native in manylinux_2_28
+        run: |
+          docker run --rm -e CONFIGURE_ARGS -v "$PWD:/src" -w /src quay.io/pypa/manylinux_2_28_x86_64 bash -c '
+            set -euo pipefail
+            git config --global --add safe.directory "*"
+            dnf install -y -q clang-devel
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y -q --default-toolchain none --profile minimal
+            source "$HOME/.cargo/env"
+            rustup toolchain install "$(cat external/wgpu-native/rust-toolchain.txt)" --profile minimal
+            /opt/python/cp312-cp312/bin/pip install -q cmake
+            /opt/python/cp312-cp312/bin/cmake -S . -B build-container $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=ON \
+              -DWGPU_NATIVE_DIST_DIR=/src/wgpu-native-dist
+          '
+        env:
+          CONFIGURE_ARGS: ${{ env.CONFIGURE_ARGS }}
+
+      - name: Configure and build (reusing the container build)
+        run: |
+          cmake -S . -B build $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=ON -DWGPU_NATIVE_DIST_DIR="$PWD/wgpu-native-dist" \
+            | tee configure.log
+          grep -q "wgpu-native: reusing the source build" configure.log
+          cmake --build build --config Release --parallel
+
+      - name: Configure and build (unpatched upstream release)
+        run: |
+          cmake -S . -B build-upstream $CONFIGURE_ARGS -DWEBGPU_BUILD_FROM_SOURCE=OFF
+          cmake --build build-upstream --config Release --parallel
+
+      - name: Compare exported symbols with the upstream release
+        run: >
+          .github/scripts/compare_wgpu_symbols.sh wgpu-native-dist/lib/libwgpu_native.a
+          "$(find build-upstream/_deps -name libwgpu_native.a | head -n 1)"
