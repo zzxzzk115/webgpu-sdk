@@ -47,7 +47,9 @@ jobs:
         if: ${{ matrix.platform == 'wasm' }}
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: latest
+          # Pinned, matching the Emscripten that VRI and Vultra build their web targets with. Changing it is a
+          # deliberate upgrade: the vendored emscripten-glfw3 misses <cmath> and fails with newer Emscripten.
+          version: 7.0.0
 
       - name: Compute Artifact Suffix
         id: artifact_meta
