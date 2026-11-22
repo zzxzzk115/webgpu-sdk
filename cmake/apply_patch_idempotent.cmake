@@ -45,5 +45,13 @@ if (EXIT_CODE EQUAL 0)
 	# Reverse patch can be applied, which means the patch has already been applied.
 	message(STATUS "Patch was already applied")
 else()
-	execute_process(COMMAND git apply --ignore-space-change --ignore-whitespace ${PATCH_FILE})
+	execute_process(
+		RESULT_VARIABLE EXIT_CODE
+		ERROR_VARIABLE STDERR
+		COMMAND git apply --ignore-space-change --ignore-whitespace ${PATCH_FILE}
+	)
+	# A patch that no longer applies must stop the build, not leave the source unpatched.
+	if (NOT EXIT_CODE EQUAL 0)
+		message(FATAL_ERROR "Patch '${PATCH_FILE}' does not apply:\n${STDERR}")
+	endif()
 endif()
