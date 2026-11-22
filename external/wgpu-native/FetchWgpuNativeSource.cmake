@@ -32,6 +32,25 @@
 set(WGPU_NATIVE_DIST_DIR "${CMAKE_BINARY_DIR}/wgpu-native-dist" CACHE PATH "\
 	Where the wgpu-native source build is placed, laid out like a wgpu-native release.")
 
+# Cargo builds for the host, so the source build serves only configures that target the host system and
+# architecture.
+detect_system_architecture()
+set(_host_arch "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+if (_host_arch MATCHES "^(AMD64|amd64|x86_64)$")
+	set(_host_arch "x86_64")
+elseif (_host_arch MATCHES "^(arm64|ARM64|aarch64)$")
+	set(_host_arch "aarch64")
+endif()
+set(_target_arch "${ARCH}")
+if (CMAKE_OSX_ARCHITECTURES)
+	string(REPLACE "arm64" "aarch64" _target_arch "${CMAKE_OSX_ARCHITECTURES}")
+endif()
+if (CMAKE_CROSSCOMPILING OR NOT _target_arch STREQUAL _host_arch)
+	message(FATAL_ERROR "wgpu-native: the source build compiles for the host (${CMAKE_HOST_SYSTEM_NAME} ${_host_arch}), "
+		"but this configure targets ${CMAKE_SYSTEM_NAME} ${_target_arch}; build on a host of the target system and "
+		"architecture, or use the precompiled release (WEBGPU_BUILD_FROM_SOURCE=OFF)")
+endif()
+
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/wgpu-git-tag.txt" _wgpu_tag LIMIT_COUNT 1)
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/rust-toolchain.txt" _rust_toolchain LIMIT_COUNT 1)
 file(GLOB _patches "${CMAKE_CURRENT_LIST_DIR}/patch/*.patch")

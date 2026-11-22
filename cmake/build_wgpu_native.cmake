@@ -18,6 +18,7 @@ endforeach()
 
 find_program(GIT_EXECUTABLE git REQUIRED)
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
+find_program(RUSTC_EXECUTABLE rustc REQUIRED)
 
 # Runs a command and stops with its output if it fails.
 function(run_checked DESCRIPTION WORKING_DIR)
@@ -88,13 +89,27 @@ if (NOT _result EQUAL 0 OR _tree MATCHES "github\\.com/gfx-rs/wgpu" OR NOT _tree
 endif()
 message(STATUS "wgpu-native: ${_tree}")
 
-message(STATUS "wgpu-native: cargo build --release (toolchain ${RUST_TOOLCHAIN})")
+# Build for the host triple into a directory of our own, so neither CARGO_TARGET_DIR nor CARGO_BUILD_TARGET (or
+# their config equivalents) moves the output. FetchWgpuNativeSource.cmake refuses configures for another target.
+execute_process(
+	COMMAND "${RUSTC_EXECUTABLE}" -vV
+	WORKING_DIRECTORY "${_native}"
+	RESULT_VARIABLE _result
+	OUTPUT_VARIABLE _rustc
+)
+if (NOT _result EQUAL 0 OR NOT _rustc MATCHES "host: ([^\r\n]+)")
+	message(FATAL_ERROR "build_wgpu_native.cmake: rustc -vV did not report the host triple:\n${_rustc}")
+endif()
+set(_triple "${CMAKE_MATCH_1}")
+
+message(STATUS "wgpu-native: cargo build --release --target ${_triple} (toolchain ${RUST_TOOLCHAIN})")
 # wgpuGetVersion() reports this, as in the upstream release build.
 set(ENV{WGPU_NATIVE_VERSION} "${WGPU_NATIVE_TAG}")
-run_checked("cargo build" "${_native}" "${CARGO_EXECUTABLE}" build --release)
+run_checked("cargo build" "${_native}" "${CARGO_EXECUTABLE}" build --release --target "${_triple}"
+	--target-dir "${WORK_DIR}/target")
 
 # Lay the output out like a wgpu-native release.
-set(_target "${_native}/target/release")
+set(_target "${WORK_DIR}/target/${_triple}/release")
 if (CMAKE_HOST_WIN32)
 	set(_static wgpu_native.lib)
 	set(_shared wgpu_native.dll wgpu_native.dll.lib)
