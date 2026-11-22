@@ -89,6 +89,8 @@ endif()
 message(STATUS "wgpu-native: ${_tree}")
 
 message(STATUS "wgpu-native: cargo build --release (toolchain ${RUST_TOOLCHAIN})")
+# wgpuGetVersion() reports this, as in the upstream release build.
+set(ENV{WGPU_NATIVE_VERSION} "${WGPU_NATIVE_TAG}")
 run_checked("cargo build" "${_native}" "${CARGO_EXECUTABLE}" build --release)
 
 # Lay the output out like a wgpu-native release.
